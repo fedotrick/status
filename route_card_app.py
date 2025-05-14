@@ -262,24 +262,21 @@ class RouteCardApp(App):
         # Создание элементов управления
         layout.add_widget(Label(
             text="Номер бланка:", 
-            size_hint=(1, 0.5),
-            tooltip="Введите номер бланка для проверки или обновления"
+            size_hint=(1, 0.5)
         ))
         self.blank_input = TextInput(multiline=False, size_hint=(1, 0.5))
         layout.add_widget(self.blank_input)
         
         layout.add_widget(Label(
             text="Учетный номер (формат: ММ-ННН/ГГ):", 
-            size_hint=(1, 0.5),
-            tooltip="Учетный номер в формате ММ-ННН/ГГ, например 05-002/25"
+            size_hint=(1, 0.5)
         ))
         self.account_input = TextInput(multiline=False, size_hint=(1, 0.5))
         layout.add_widget(self.account_input)
         
         layout.add_widget(Label(
             text="Номер кластера (формат: КГГ/ММ-ННН):", 
-            size_hint=(1, 0.5),
-            tooltip="Номер кластера в формате КГГ/ММ-ННН, например К25/05-099"
+            size_hint=(1, 0.5)
         ))
         self.cluster_input = TextInput(multiline=False, size_hint=(1, 0.5))
         layout.add_widget(self.cluster_input)
