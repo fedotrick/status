@@ -5,7 +5,8 @@ from typing import List, Optional, Tuple, Union
 
 from kivy.app import App
 from kivy.core.window import Window
-from kivy.metrics import dp
+from kivy.graphics import Color, Rectangle
+from kivy.metrics import dp, sp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.gridlayout import GridLayout
@@ -183,32 +184,71 @@ class DataTable(GridLayout):
         """
         super().__init__(**kwargs)
         self.cols = len(headers)
-        self.spacing = [1, 1]
+        self.spacing = [2, 2]
         self.size_hint_y = None
         self.bind(minimum_height=self.setter('height'))
         
         # Добавляем заголовки
         for header in headers:
-            self.add_widget(Label(
+            header_label = Label(
                 text=header,
                 size_hint_y=None,
-                height=dp(40),
+                height=dp(45),
                 bold=True,
-                background_color=(0.5, 0.5, 0.5, 1)
-            ))
+                font_size=sp(16),
+                color=(1, 1, 1, 1)
+            )
+            with header_label.canvas.before:
+                Color(0.2, 0.3, 0.4, 1)  # Тёмно-синий цвет фона для заголовков
+                Rectangle(pos=header_label.pos, size=header_label.size)
+            header_label.bind(size=self.update_rect, pos=self.update_rect)
+            self.add_widget(header_label)
         
         # Добавляем данные
-        for row in row_data:
+        for i, row in enumerate(row_data):
             for cell in row:
                 cell_text = str(cell) if cell is not None else ""
-                self.add_widget(Label(
+                cell_label = Label(
                     text=cell_text,
                     size_hint_y=None,
-                    height=dp(30),
-                    text_size=(None, dp(30)),
-                    valign='middle'
-                ))
+                    height=dp(35),
+                    font_size=sp(14),
+                    text_size=(None, dp(35)),
+                    valign='middle',
+                    color=(0, 0, 0, 1)  # Черный текст на светлом фоне
+                )
+                
+                # Чередование цветов строк для лучшей читаемости
+                bg_color = (0.9, 0.9, 0.9, 1) if i % 2 == 0 else (1, 1, 1, 1)
+                
+                with cell_label.canvas.before:
+                    Color(*bg_color)
+                    Rectangle(pos=cell_label.pos, size=cell_label.size)
+                cell_label.bind(size=self.update_rect, pos=self.update_rect)
+                self.add_widget(cell_label)
+    
+    def update_rect(self, instance, value):
+        """Обновление прямоугольника при изменении размера или позиции."""
+        instance.canvas.before.clear()
+        with instance.canvas.before:
+            if isinstance(instance, Label) and instance.bold:
+                # Заголовок
+                Color(0.2, 0.3, 0.4, 1)
+            else:
+                # Ячейка данных
+                row_index = int(self.children.index(instance) / self.cols)
+                bg_color = (0.9, 0.9, 0.9, 1) if row_index % 2 == 0 else (1, 1, 1, 1)
+                Color(*bg_color)
+            Rectangle(pos=instance.pos, size=instance.size)
 
+
+class CustomTabbedPanelItem(TabbedPanelItem):
+    """Настраиваемый элемент вкладки."""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.font_size = sp(16)  # Увеличиваем размер шрифта
+        
 
 class RouteCardApp(App):
     """Приложение для работы с маршрутными картами."""
@@ -231,16 +271,29 @@ class RouteCardApp(App):
         Window.size = (800, 600)
         self.title = "Система учета маршрутных карт"
         
-        # Создаем панель с вкладками
-        tab_panel = TabbedPanel(do_default_tab=False)
+        # Создаем панель с вкладками с улучшенным оформлением
+        tab_panel = TabbedPanel(
+            do_default_tab=False,
+            background_color=(0.15, 0.15, 0.15, 1),  # Более темный фон
+            tab_width=200,  # Увеличиваем ширину вкладок
+            tab_height=40   # Увеличиваем высоту вкладок
+        )
         
-        # Вкладка редактирования
-        edit_tab = TabbedPanelItem(text="Редактирование")
+        # Вкладка редактирования с улучшенным оформлением
+        edit_tab = CustomTabbedPanelItem(
+            text="Редактирование",
+            background_color=(0.2, 0.3, 0.5, 1),  # Синий цвет для активной вкладки
+            color=(1, 1, 1, 1)  # Белый цвет текста
+        )
         edit_layout = self.build_edit_tab()
         edit_tab.add_widget(edit_layout)
         
-        # Вкладка просмотра
-        view_tab = TabbedPanelItem(text="Просмотр данных")
+        # Вкладка просмотра с улучшенным оформлением
+        view_tab = CustomTabbedPanelItem(
+            text="Просмотр данных",
+            background_color=(0.3, 0.3, 0.3, 1),  # Серый цвет для неактивной вкладки
+            color=(0.9, 0.9, 0.9, 1)  # Светло-серый цвет текста
+        )
         view_layout = self.build_view_tab()
         view_tab.add_widget(view_layout)
         
@@ -257,35 +310,63 @@ class RouteCardApp(App):
         Returns:
             Макет вкладки редактирования
         """
-        layout = BoxLayout(orientation="vertical", spacing=10, padding=20)
+        layout = BoxLayout(orientation="vertical", spacing=15, padding=25)
         
-        # Создание элементов управления
-        layout.add_widget(Label(
+        # Создание элементов управления с улучшенным оформлением
+        label_blank = Label(
             text="Номер бланка:", 
-            size_hint=(1, 0.5)
-        ))
-        self.blank_input = TextInput(multiline=False, size_hint=(1, 0.5))
+            size_hint=(1, 0.5),
+            font_size=sp(16),
+            color=(1, 1, 1, 1)
+        )
+        layout.add_widget(label_blank)
+        
+        self.blank_input = TextInput(
+            multiline=False, 
+            size_hint=(1, 0.5),
+            font_size=sp(16),
+            hint_text="Введите номер бланка"
+        )
         layout.add_widget(self.blank_input)
         
-        layout.add_widget(Label(
+        label_account = Label(
             text="Учетный номер (формат: ММ-ННН/ГГ):", 
-            size_hint=(1, 0.5)
-        ))
-        self.account_input = TextInput(multiline=False, size_hint=(1, 0.5))
+            size_hint=(1, 0.5),
+            font_size=sp(16),
+            color=(1, 1, 1, 1)
+        )
+        layout.add_widget(label_account)
+        
+        self.account_input = TextInput(
+            multiline=False, 
+            size_hint=(1, 0.5),
+            font_size=sp(16),
+            hint_text="Например: 05-002/25"
+        )
         layout.add_widget(self.account_input)
         
-        layout.add_widget(Label(
+        label_cluster = Label(
             text="Номер кластера (формат: КГГ/ММ-ННН):", 
-            size_hint=(1, 0.5)
-        ))
-        self.cluster_input = TextInput(multiline=False, size_hint=(1, 0.5))
+            size_hint=(1, 0.5),
+            font_size=sp(16),
+            color=(1, 1, 1, 1)
+        )
+        layout.add_widget(label_cluster)
+        
+        self.cluster_input = TextInput(
+            multiline=False, 
+            size_hint=(1, 0.5),
+            font_size=sp(16),
+            hint_text="Например: К25/05-099"
+        )
         layout.add_widget(self.cluster_input)
         
-        # Кнопка для проверки и обновления данных
+        # Кнопка для проверки и обновления данных с улучшенным оформлением
         check_button = Button(
             text="Проверить/Обновить",
-            size_hint=(1, 0.7),
-            background_color=(0.3, 0.6, 0.9, 1)
+            size_hint=(1, 0.8),
+            background_color=(0.2, 0.4, 0.8, 1),  # Более яркий синий цвет
+            font_size=sp(18)
         )
         check_button.bind(on_press=self.on_check_button_press)
         layout.add_widget(check_button)
@@ -302,20 +383,22 @@ class RouteCardApp(App):
         Returns:
             Макет вкладки просмотра данных
         """
-        layout = BoxLayout(orientation="vertical", spacing=10, padding=20)
+        layout = BoxLayout(orientation="vertical", spacing=15, padding=25)
         
-        # Строка поиска и кнопка
-        search_layout = BoxLayout(orientation="horizontal", size_hint=(1, 0.1))
+        # Строка поиска и кнопка с улучшенным оформлением
+        search_layout = BoxLayout(orientation="horizontal", size_hint=(1, 0.12), spacing=10)
         
         self.search_input = TextInput(
             multiline=False, 
             hint_text="Введите текст для поиска",
-            size_hint=(0.8, 1)
+            size_hint=(0.8, 1),
+            font_size=sp(16)
         )
         search_button = Button(
             text="Поиск",
             size_hint=(0.2, 1),
-            background_color=(0.3, 0.6, 0.9, 1)
+            background_color=(0.2, 0.4, 0.8, 1),  # Более яркий синий цвет
+            font_size=sp(16)
         )
         search_button.bind(on_press=self.on_search_button_press)
         
@@ -325,7 +408,7 @@ class RouteCardApp(App):
         layout.add_widget(search_layout)
         
         # Область прокрутки для таблицы
-        self.scroll_view = ScrollView(size_hint=(1, 0.9))
+        self.scroll_view = ScrollView(size_hint=(1, 0.78))
         
         # Получаем записи из базы данных
         try:
@@ -344,16 +427,21 @@ class RouteCardApp(App):
             self.scroll_view.add_widget(self.data_table)
             
         except Exception as e:
-            error_label = Label(text=f"Ошибка при загрузке данных: {e}")
+            error_label = Label(
+                text=f"Ошибка при загрузке данных: {e}",
+                font_size=sp(16),
+                color=(1, 0.3, 0.3, 1)  # Красный цвет для ошибок
+            )
             self.scroll_view.add_widget(error_label)
         
         layout.add_widget(self.scroll_view)
         
-        # Кнопка обновления таблицы
+        # Кнопка обновления таблицы с улучшенным оформлением
         refresh_button = Button(
             text="Обновить данные",
             size_hint=(1, 0.1),
-            background_color=(0.2, 0.7, 0.3, 1)
+            background_color=(0.2, 0.6, 0.3, 1),  # Зеленый цвет
+            font_size=sp(16)
         )
         refresh_button.bind(on_press=self.on_refresh_button_press)
         layout.add_widget(refresh_button)
@@ -458,7 +546,7 @@ class RouteCardApp(App):
                 
                 # Меняем действие кнопки на обновление
                 instance.text = "Сохранить"
-                instance.background_color = (0.2, 0.7, 0.3, 1)
+                instance.background_color = (0.2, 0.7, 0.3, 1)  # Зеленый цвет для кнопки сохранения
                 instance.unbind(on_press=self.on_check_button_press)
                 instance.bind(on_press=self.on_save_button_press)
         except Exception as e:
@@ -499,7 +587,7 @@ class RouteCardApp(App):
                 
                 # Возвращаем кнопку в исходное состояние
                 instance.text = "Проверить/Обновить"
-                instance.background_color = (0.3, 0.6, 0.9, 1)
+                instance.background_color = (0.2, 0.4, 0.8, 1)  # Возвращаем синий цвет
                 instance.unbind(on_press=self.on_save_button_press)
                 instance.bind(on_press=self.on_check_button_press)
             else:
@@ -514,13 +602,27 @@ class RouteCardApp(App):
             title: Заголовок окна
             message: Текст сообщения
         """
-        content = BoxLayout(orientation="vertical", padding=10, spacing=10)
-        content.add_widget(Label(text=message))
+        content = BoxLayout(orientation="vertical", padding=15, spacing=15)
+        content.add_widget(Label(
+            text=message,
+            font_size=sp(16)
+        ))
         
-        btn = Button(text="OK", size_hint=(1, 0.5))
+        btn = Button(
+            text="OK", 
+            size_hint=(1, 0.5),
+            background_color=(0.2, 0.4, 0.8, 1),
+            font_size=sp(16)
+        )
         content.add_widget(btn)
         
-        popup = Popup(title=title, content=content, size_hint=(0.7, 0.5))
+        popup = Popup(
+            title=title, 
+            content=content, 
+            size_hint=(0.7, 0.5),
+            title_size=sp(18),
+            title_color=(1, 1, 1, 1)
+        )
         btn.bind(on_press=popup.dismiss)
         
         popup.open()
