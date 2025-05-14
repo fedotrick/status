@@ -158,6 +158,14 @@ class RouteCardApp(App):
         
         return layout
     
+    def reset_form(self) -> None:
+        """Сброс формы в начальное состояние."""
+        self.blank_input.text = ""
+        self.account_input.text = ""
+        self.cluster_input.text = ""
+        self.account_input.disabled = True
+        self.cluster_input.disabled = True
+    
     def on_check_button_press(self, instance: Button) -> None:
         """Обработчик нажатия на кнопку проверки.
         
@@ -176,6 +184,7 @@ class RouteCardApp(App):
         if not result["exists"]:
             # Бланк не найден
             self.show_popup("Информация", f"Бланк с номером {blank_number} не найден в базе данных")
+            self.reset_form()
             return
         
         # Если учетный номер и номер кластера заполнены
@@ -185,6 +194,7 @@ class RouteCardApp(App):
                 f"Информация по номеру бланка {blank_number} уже существует.\n"
                 "Обратитесь к администратору или проверьте внимательно номер."
             )
+            self.reset_form()
         else:
             # Разрешаем ввод для заполнения пустых полей
             self.account_input.disabled = False
@@ -228,11 +238,7 @@ class RouteCardApp(App):
             self.show_popup("Успех", "Информация успешно обновлена!")
             
             # Сбрасываем форму
-            self.blank_input.text = ""
-            self.account_input.text = ""
-            self.cluster_input.text = ""
-            self.account_input.disabled = True
-            self.cluster_input.disabled = True
+            self.reset_form()
             
             # Возвращаем кнопку в исходное состояние
             instance.text = "Проверить/Обновить"
