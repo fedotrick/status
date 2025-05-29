@@ -1,7 +1,7 @@
 import re
 import sqlite3
-from datetime import datetime
-from typing import List, Optional, Tuple, Union
+from datetime import datetime, timedelta
+from typing import List, Optional, Tuple, Union, Dict
 
 from kivy.app import App
 from kivy.core.window import Window
@@ -13,6 +13,7 @@ from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.spinner import Spinner
 from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
 from kivy.uix.textinput import TextInput
 
@@ -73,6 +74,54 @@ class DatabaseManager:
             return result
         except sqlite3.Error as e:
             raise Exception(f"Ошибка при проверке номера бланка: {e}")
+        finally:
+            conn.close()
+            
+    def check_account_number(self, account_number: str) -> bool:
+        """Проверка наличия учетного номера в базе данных.
+        
+        Args:
+            account_number: Учетный номер для проверки
+            
+        Returns:
+            True если номер существует, иначе False
+        """
+        conn, cursor = self.connect()
+        
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) FROM маршрутные_карты WHERE Учетный_номер = ? AND Статус = 'Завершена'", 
+                (account_number,)
+            )
+            count = cursor.fetchone()[0]
+            return count > 0
+        except sqlite3.Error as e:
+            print(f"Ошибка при проверке учетного номера: {e}")
+            return False
+        finally:
+            conn.close()
+    
+    def check_cluster_number(self, cluster_number: str) -> bool:
+        """Проверка наличия номера кластера в базе данных.
+        
+        Args:
+            cluster_number: Номер кластера для проверки
+            
+        Returns:
+            True если номер существует, иначе False
+        """
+        conn, cursor = self.connect()
+        
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) FROM маршрутные_карты WHERE Номер_кластера = ? AND Статус = 'Завершена'", 
+                (cluster_number,)
+            )
+            count = cursor.fetchone()[0]
+            return count > 0
+        except sqlite3.Error as e:
+            print(f"Ошибка при проверке номера кластера: {e}")
+            return False
         finally:
             conn.close()
     
@@ -170,6 +219,182 @@ class DatabaseManager:
             return []
         finally:
             conn.close()
+    
+    def get_total_cards_count(self) -> int:
+        """Получение общего количества маршрутных карт в базе данных.
+        
+        Returns:
+            Общее количество карт
+        """
+        conn, cursor = self.connect()
+        
+        try:
+            cursor.execute("SELECT COUNT(*) FROM маршрутные_карты")
+            return cursor.fetchone()[0]
+        except sqlite3.Error as e:
+            print(f"Ошибка при получении общего количества карт: {e}")
+            return 0
+        finally:
+            conn.close()
+    
+    def get_completed_cards_count(self) -> int:
+        """Получение количества заполненных маршрутных карт.
+        
+        Returns:
+            Количество заполненных карт
+        """
+        conn, cursor = self.connect()
+        
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) FROM маршрутные_карты WHERE Статус = 'Завершена'"
+            )
+            return cursor.fetchone()[0]
+        except sqlite3.Error as e:
+            print(f"Ошибка при получении количества заполненных карт: {e}")
+            return 0
+        finally:
+            conn.close()
+    
+    def get_incomplete_cards_count(self) -> int:
+        """Получение количества незаполненных маршрутных карт.
+        
+        Returns:
+            Количество незаполненных карт
+        """
+        conn, cursor = self.connect()
+        
+        try:
+            cursor.execute(
+                """SELECT COUNT(*) FROM маршрутные_карты 
+                   WHERE Учетный_номер IS NULL OR Учетный_номер = '' 
+                   OR Номер_кластера IS NULL OR Номер_кластера = ''"""
+            )
+            return cursor.fetchone()[0]
+        except sqlite3.Error as e:
+            print(f"Ошибка при получении количества незаполненных карт: {e}")
+            return 0
+        finally:
+            conn.close()
+    
+    def get_cards_by_period(self, period_start: str, period_end: str) -> List[tuple]:
+        """Получение списка маршрутных карт за указанный период.
+        
+        Args:
+            period_start: Начало периода в формате 'YYYY-MM-DD'
+            period_end: Конец периода в формате 'YYYY-MM-DD'
+            
+        Returns:
+            Список маршрутных карт за период
+        """
+        conn, cursor = self.connect()
+        
+        try:
+            cursor.execute(
+                """SELECT id, Номер_бланка, Учетный_номер, Номер_кластера, Статус, Дата_создания 
+                   FROM маршрутные_карты
+                   WHERE date(Дата_создания) BETWEEN date(?) AND date(?)
+                   ORDER BY Дата_создания DESC""",
+                (period_start, period_end)
+            )
+            return cursor.fetchall()
+        except sqlite3.Error as e:
+            print(f"Ошибка при получении карт за период: {e}")
+            return []
+        finally:
+            conn.close()
+    
+    def get_cards_count_by_period(self, period_start: str, period_end: str) -> int:
+        """Получение количества маршрутных карт за указанный период.
+        
+        Args:
+            period_start: Начало периода в формате 'YYYY-MM-DD'
+            period_end: Конец периода в формате 'YYYY-MM-DD'
+            
+        Returns:
+            Количество маршрутных карт за период
+        """
+        conn, cursor = self.connect()
+        
+        try:
+            cursor.execute(
+                """SELECT COUNT(*) FROM маршрутные_карты
+                   WHERE date(Дата_создания) BETWEEN date(?) AND date(?)""",
+                (period_start, period_end)
+            )
+            return cursor.fetchone()[0]
+        except sqlite3.Error as e:
+            print(f"Ошибка при получении количества карт за период: {e}")
+            return 0
+        finally:
+            conn.close()
+    
+    def get_completed_cards_by_period(self, period_start: str, period_end: str) -> int:
+        """Получение количества заполненных маршрутных карт за период.
+        
+        Args:
+            period_start: Начало периода в формате 'YYYY-MM-DD'
+            period_end: Конец периода в формате 'YYYY-MM-DD'
+            
+        Returns:
+            Количество заполненных маршрутных карт за период
+        """
+        conn, cursor = self.connect()
+        
+        try:
+            cursor.execute(
+                """SELECT COUNT(*) FROM маршрутные_карты
+                   WHERE Статус = 'Завершена'
+                   AND date(Дата_создания) BETWEEN date(?) AND date(?)""",
+                (period_start, period_end)
+            )
+            return cursor.fetchone()[0]
+        except sqlite3.Error as e:
+            print(f"Ошибка при получении количества заполненных карт за период: {e}")
+            return 0
+        finally:
+            conn.close()
+    
+    def get_monthly_stats(self, year: int = None) -> List[tuple]:
+        """Получение статистики по месяцам.
+        
+        Args:
+            year: Год для фильтрации, если None - за все время
+            
+        Returns:
+            Список кортежей (месяц, год, количество заполненных карт)
+        """
+        conn, cursor = self.connect()
+        
+        try:
+            if year:
+                cursor.execute(
+                    """SELECT strftime('%m', Дата_создания) as Месяц, 
+                             strftime('%Y', Дата_создания) as Год,
+                             COUNT(*) as Количество
+                       FROM маршрутные_карты
+                       WHERE Статус = 'Завершена'
+                       AND strftime('%Y', Дата_создания) = ?
+                       GROUP BY Месяц, Год
+                       ORDER BY Год, Месяц""",
+                    (str(year),)
+                )
+            else:
+                cursor.execute(
+                    """SELECT strftime('%m', Дата_создания) as Месяц, 
+                             strftime('%Y', Дата_создания) as Год,
+                             COUNT(*) as Количество
+                       FROM маршрутные_карты
+                       WHERE Статус = 'Завершена'
+                       GROUP BY Месяц, Год
+                       ORDER BY Год, Месяц"""
+                )
+            return cursor.fetchall()
+        except sqlite3.Error as e:
+            print(f"Ошибка при получении месячной статистики: {e}")
+            return []
+        finally:
+            conn.close()
 
 
 class DataTable(GridLayout):
@@ -242,6 +467,35 @@ class DataTable(GridLayout):
             Rectangle(pos=instance.pos, size=instance.size)
 
 
+class NavigableTextInput(TextInput):
+    """Текстовое поле с навигацией с помощью стрелок."""
+    
+    def __init__(self, next_widget=None, prev_widget=None, **kwargs):
+        super().__init__(**kwargs)
+        self.next_widget = next_widget
+        self.prev_widget = prev_widget
+        
+    def keyboard_on_key_down(self, window, keycode, text, modifiers):
+        # Вызываем стандартную обработку сначала
+        ret = super(NavigableTextInput, self).keyboard_on_key_down(window, keycode, text, modifiers)
+        
+        # Обработка стрелок вверх и вниз для навигации между полями
+        if keycode[1] == 'down':
+            if self.next_widget:
+                self.next_widget.focus = True
+                # Установим курсор в конец текста следующего поля
+                if hasattr(self.next_widget, 'cursor_col'):
+                    self.next_widget.cursor = (len(self.next_widget.text), 0)
+        elif keycode[1] == 'up':
+            if self.prev_widget:
+                self.prev_widget.focus = True
+                # Установим курсор в конец текста предыдущего поля
+                if hasattr(self.prev_widget, 'cursor_col'):
+                    self.prev_widget.cursor = (len(self.prev_widget.text), 0)
+        
+        return ret
+
+
 class CustomTabbedPanelItem(TabbedPanelItem):
     """Настраиваемый элемент вкладки."""
     
@@ -297,9 +551,19 @@ class RouteCardApp(App):
         view_layout = self.build_view_tab()
         view_tab.add_widget(view_layout)
         
+        # Вкладка статистики с улучшенным оформлением
+        stats_tab = CustomTabbedPanelItem(
+            text="Статистика",
+            background_color=(0.3, 0.4, 0.3, 1),  # Зеленоватый цвет для вкладки статистики
+            color=(0.9, 0.9, 0.9, 1)  # Светло-серый цвет текста
+        )
+        stats_layout = self.build_stats_tab()
+        stats_tab.add_widget(stats_layout)
+        
         # Добавляем вкладки на панель
         tab_panel.add_widget(edit_tab)
         tab_panel.add_widget(view_tab)
+        tab_panel.add_widget(stats_tab)
         tab_panel.default_tab = edit_tab
         
         return tab_panel
@@ -321,7 +585,7 @@ class RouteCardApp(App):
         )
         layout.add_widget(label_blank)
         
-        self.blank_input = TextInput(
+        self.blank_input = NavigableTextInput(
             multiline=False, 
             size_hint=(1, 0.5),
             font_size=sp(16),
@@ -337,7 +601,7 @@ class RouteCardApp(App):
         )
         layout.add_widget(label_account)
         
-        self.account_input = TextInput(
+        self.account_input = NavigableTextInput(
             multiline=False, 
             size_hint=(1, 0.5),
             font_size=sp(16),
@@ -353,7 +617,7 @@ class RouteCardApp(App):
         )
         layout.add_widget(label_cluster)
         
-        self.cluster_input = TextInput(
+        self.cluster_input = NavigableTextInput(
             multiline=False, 
             size_hint=(1, 0.5),
             font_size=sp(16),
@@ -374,6 +638,12 @@ class RouteCardApp(App):
         # Изначально отключаем поля для ввода
         self.account_input.disabled = True
         self.cluster_input.disabled = True
+        
+        # Настраиваем навигацию между полями
+        self.blank_input.next_widget = self.account_input
+        self.account_input.prev_widget = self.blank_input
+        self.account_input.next_widget = self.cluster_input
+        self.cluster_input.prev_widget = self.account_input
         
         return layout
     
@@ -445,6 +715,183 @@ class RouteCardApp(App):
         )
         refresh_button.bind(on_press=self.on_refresh_button_press)
         layout.add_widget(refresh_button)
+        
+        return layout
+    
+    def update_rect_widget(self, instance, value, color):
+        """Обновление прямоугольника для виджета с заданным цветом.
+        
+        Args:
+            instance: Экземпляр виджета
+            value: Новое значение свойства
+            color: Цвет прямоугольника (r, g, b, a)
+        """
+        instance.canvas.before.clear()
+        with instance.canvas.before:
+            Color(*color)
+            Rectangle(pos=instance.pos, size=instance.size)
+    
+    def build_stats_tab(self) -> BoxLayout:
+        """Создание интерфейса вкладки статистики.
+        
+        Returns:
+            Макет вкладки статистики
+        """
+        layout = BoxLayout(orientation="vertical", spacing=15, padding=25)
+        
+        # Общая статистика
+        stats_header = Label(
+            text="Общая статистика по маршрутным картам",
+            size_hint=(1, 0.1),
+            font_size=sp(20),
+            bold=True,
+            color=(1, 1, 1, 1)
+        )
+        layout.add_widget(stats_header)
+        
+        # Получаем данные для статистики
+        total_cards = self.db_manager.get_total_cards_count()
+        completed_cards = self.db_manager.get_completed_cards_count()
+        incomplete_cards = self.db_manager.get_incomplete_cards_count()
+        
+        # Создаем информационные блоки
+        summary_grid = GridLayout(cols=3, spacing=10, size_hint=(1, 0.2))
+        
+        # Блок с общим количеством карт
+        total_block = BoxLayout(orientation="vertical", padding=10)
+        total_color = (0.2, 0.3, 0.5, 1)  # Синий цвет
+        with total_block.canvas.before:
+            Color(*total_color)
+            Rectangle(pos=total_block.pos, size=total_block.size)
+        total_block.bind(pos=lambda obj, val: self.update_rect_widget(obj, val, total_color), 
+                        size=lambda obj, val: self.update_rect_widget(obj, val, total_color))
+        
+        total_label = Label(
+            text="Всего карт",
+            font_size=sp(16),
+            bold=True
+        )
+        total_value = Label(
+            text=str(total_cards),
+            font_size=sp(24),
+            bold=True
+        )
+        total_block.add_widget(total_label)
+        total_block.add_widget(total_value)
+        
+        # Блок с заполненными картами
+        completed_block = BoxLayout(orientation="vertical", padding=10)
+        completed_color = (0.2, 0.6, 0.3, 1)  # Зеленый цвет
+        with completed_block.canvas.before:
+            Color(*completed_color)
+            Rectangle(pos=completed_block.pos, size=completed_block.size)
+        completed_block.bind(pos=lambda obj, val: self.update_rect_widget(obj, val, completed_color), 
+                           size=lambda obj, val: self.update_rect_widget(obj, val, completed_color))
+        
+        completed_label = Label(
+            text="Заполненные карты",
+            font_size=sp(16),
+            bold=True
+        )
+        completed_value = Label(
+            text=str(completed_cards),
+            font_size=sp(24),
+            bold=True
+        )
+        completed_block.add_widget(completed_label)
+        completed_block.add_widget(completed_value)
+        
+        # Блок с незаполненными картами
+        incomplete_block = BoxLayout(orientation="vertical", padding=10)
+        incomplete_color = (0.8, 0.4, 0.2, 1)  # Оранжевый цвет
+        with incomplete_block.canvas.before:
+            Color(*incomplete_color)
+            Rectangle(pos=incomplete_block.pos, size=incomplete_block.size)
+        incomplete_block.bind(pos=lambda obj, val: self.update_rect_widget(obj, val, incomplete_color), 
+                            size=lambda obj, val: self.update_rect_widget(obj, val, incomplete_color))
+        
+        incomplete_label = Label(
+            text="Незаполненные карты",
+            font_size=sp(16),
+            bold=True
+        )
+        incomplete_value = Label(
+            text=str(incomplete_cards),
+            font_size=sp(24),
+            bold=True
+        )
+        incomplete_block.add_widget(incomplete_label)
+        incomplete_block.add_widget(incomplete_value)
+        
+        summary_grid.add_widget(total_block)
+        summary_grid.add_widget(completed_block)
+        summary_grid.add_widget(incomplete_block)
+        
+        layout.add_widget(summary_grid)
+        
+        # Добавляем фильтрацию по периодам
+        period_header = Label(
+            text="Статистика по периодам",
+            size_hint=(1, 0.1),
+            font_size=sp(18),
+            bold=True,
+            color=(1, 1, 1, 1)
+        )
+        layout.add_widget(period_header)
+        
+        # Добавляем элементы выбора периода
+        filter_layout = BoxLayout(orientation="horizontal", spacing=10, size_hint=(1, 0.15))
+        
+        # Выбор предопределенных периодов
+        period_label = Label(
+            text="Период:",
+            size_hint=(0.2, 1),
+            font_size=sp(16),
+            color=(1, 1, 1, 1)
+        )
+        
+        current_date = datetime.now()
+        periods = [
+            "Все время",
+            "Сегодня",
+            "Текущий месяц",
+            "Прошлый месяц",
+            "Последние 3 месяца",
+            "Текущий год",
+            "Прошлый год",
+            "Пользовательский период"
+        ]
+        
+        period_spinner = Spinner(
+            text=periods[0],
+            values=periods,
+            size_hint=(0.4, 1),
+            font_size=sp(16),
+            background_color=(0.2, 0.4, 0.6, 1)  # Голубой цвет
+        )
+        
+        # Кнопка обновления статистики
+        refresh_stats_button = Button(
+            text="Обновить статистику",
+            size_hint=(0.4, 1),
+            font_size=sp(16),
+            background_color=(0.2, 0.6, 0.3, 1)  # Зеленый цвет
+        )
+        refresh_stats_button.bind(on_press=lambda x: self.on_refresh_stats_button_press(period_spinner.text))
+        
+        filter_layout.add_widget(period_label)
+        filter_layout.add_widget(period_spinner)
+        filter_layout.add_widget(refresh_stats_button)
+        
+        layout.add_widget(filter_layout)
+        
+        # Создаем область для отображения статистики по периодам
+        self.period_stats_container = BoxLayout(orientation="vertical", size_hint=(1, 0.45))
+        
+        # По умолчанию показываем статистику по месяцам за весь период
+        self.update_period_stats("Все время")
+        
+        layout.add_widget(self.period_stats_container)
         
         return layout
     
@@ -577,6 +1024,22 @@ class RouteCardApp(App):
             )
             return
         
+        # Проверка дублирования учетного номера
+        if self.db_manager.check_account_number(account_number):
+            self.show_popup(
+                "Ошибка", 
+                f"Учетный номер '{account_number}' уже существует в базе данных. Пожалуйста, используйте другой номер."
+            )
+            return
+        
+        # Проверка дублирования номера кластера
+        if self.db_manager.check_cluster_number(cluster_number):
+            self.show_popup(
+                "Ошибка", 
+                f"Номер кластера '{cluster_number}' уже существует в базе данных. Пожалуйста, используйте другой номер."
+            )
+            return
+        
         try:
             # Обновляем информацию в базе данных
             if self.db_manager.update_card_info(self.current_blank, account_number, cluster_number):
@@ -595,6 +1058,76 @@ class RouteCardApp(App):
         except Exception as e:
             self.show_popup("Ошибка", f"Произошла ошибка при сохранении данных: {e}")
     
+    def get_period_dates(self, period_name: str) -> Tuple[str, str]:
+        """Получение дат начала и конца периода по его названию.
+        
+        Args:
+            period_name: Название периода
+            
+        Returns:
+            Кортеж из двух строк в формате 'YYYY-MM-DD' (начало и конец периода)
+        """
+        today = datetime.now()
+        end_date = today.strftime("%Y-%m-%d")
+        
+        if period_name == "Все время":
+            # С начала времен до текущей даты
+            start_date = "2000-01-01"  # Достаточно далекое прошлое
+        
+        elif period_name == "Сегодня":
+            # Только сегодняшний день
+            start_date = today.strftime("%Y-%m-%d")
+        
+        elif period_name == "Текущий месяц":
+            # С первого числа текущего месяца до текущей даты
+            start_date = f"{today.year}-{today.month:02d}-01"
+        
+        elif period_name == "Прошлый месяц":
+            # Весь предыдущий месяц
+            last_month = today.month - 1
+            year = today.year
+            
+            if last_month == 0:
+                last_month = 12
+                year -= 1
+            
+            # Последний день месяца
+            if last_month in [1, 3, 5, 7, 8, 10, 12]:
+                last_day = 31
+            elif last_month in [4, 6, 9, 11]:
+                last_day = 30
+            elif last_month == 2:
+                # Проверка на високосный год
+                if (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0):
+                    last_day = 29
+                else:
+                    last_day = 28
+            
+            start_date = f"{year}-{last_month:02d}-01"
+            end_date = f"{year}-{last_month:02d}-{last_day:02d}"
+        
+        elif period_name == "Последние 3 месяца":
+            # От даты 3 месяца назад до текущей даты
+            three_months_ago = today - timedelta(days=90)
+            start_date = three_months_ago.strftime("%Y-%m-%d")
+        
+        elif period_name == "Текущий год":
+            # С начала года до текущей даты
+            start_date = f"{today.year}-01-01"
+        
+        elif period_name == "Прошлый год":
+            # Весь предыдущий год
+            last_year = today.year - 1
+            start_date = f"{last_year}-01-01"
+            end_date = f"{last_year}-12-31"
+        
+        else:  # По умолчанию или пользовательский период
+            # Для пользовательского периода можно было бы добавить дополнительные элементы интерфейса для выбора дат,
+            # но для простоты сейчас используем последний месяц
+            start_date = "2000-01-01"
+        
+        return start_date, end_date
+
     def show_popup(self, title: str, message: str) -> None:
         """Отображение всплывающего окна с сообщением.
         
@@ -626,6 +1159,228 @@ class RouteCardApp(App):
         btn.bind(on_press=popup.dismiss)
         
         popup.open()
+
+
+    def on_refresh_stats_button_press(self, period_name: str) -> None:
+        """Обработчик нажатия на кнопку обновления статистики.
+        
+        Args:
+            period_name: Выбранный период из выпадающего списка
+        """
+        self.update_period_stats(period_name)
+    
+    def update_period_stats(self, period_name: str) -> None:
+        """Обновление статистики по периоду.
+        
+        Args:
+            period_name: Название периода
+        """
+        # Получаем даты начала и конца периода
+        start_date, end_date = self.get_period_dates(period_name)
+        
+        # Очищаем контейнер статистики
+        self.period_stats_container.clear_widgets()
+        
+        # Отображаем сводку по периоду
+        self.display_period_summary(start_date, end_date, period_name)
+        
+        # Отображаем статистику по месяцам
+        if period_name == "Текущий год" or period_name == "Прошлый год":
+            year = int(start_date.split("-")[0])
+            self.display_monthly_stats(year)
+        else:
+            self.display_monthly_stats()
+    
+    def display_period_summary(self, start_date: str, end_date: str, period_name: str) -> None:
+        """Отображение сводки по выбранному периоду.
+        
+        Args:
+            start_date: Дата начала периода
+            end_date: Дата конца периода
+            period_name: Название периода
+        """
+        # Получаем данные по периоду
+        total_cards = self.db_manager.get_cards_count_by_period(start_date, end_date)
+        completed_cards = self.db_manager.get_completed_cards_by_period(start_date, end_date)
+        
+        # Создаем заголовок для периода
+        if period_name == "Все время":
+            header_text = "Сводка за все время"
+        elif period_name == "Сегодня":
+            header_text = f"Сводка за сегодня ({start_date})"
+        else:
+            header_text = f"Сводка за период: {start_date} - {end_date}"
+        
+        period_header = Label(
+            text=header_text,
+            size_hint=(1, 0.2),
+            font_size=sp(18),
+            bold=True,
+            color=(1, 1, 1, 1)
+        )
+        self.period_stats_container.add_widget(period_header)
+        
+        # Создаем статистические блоки для периода
+        stats_grid = GridLayout(cols=2, spacing=10, size_hint=(1, 0.3))
+        
+        # Блок с общим количеством карт за период
+        period_total_block = BoxLayout(orientation="vertical", padding=10)
+        period_total_color = (0.2, 0.4, 0.6, 1)  # Голубой цвет
+        with period_total_block.canvas.before:
+            Color(*period_total_color)
+            Rectangle(pos=period_total_block.pos, size=period_total_block.size)
+        period_total_block.bind(pos=lambda obj, val: self.update_rect_widget(obj, val, period_total_color), 
+                               size=lambda obj, val: self.update_rect_widget(obj, val, period_total_color))
+        
+        period_total_label = Label(
+            text="Всего карт за период",
+            font_size=sp(16),
+            bold=True
+        )
+        period_total_value = Label(
+            text=str(total_cards),
+            font_size=sp(24),
+            bold=True
+        )
+        period_total_block.add_widget(period_total_label)
+        period_total_block.add_widget(period_total_value)
+        
+        # Блок с заполненными картами за период
+        period_completed_block = BoxLayout(orientation="vertical", padding=10)
+        period_completed_color = (0.2, 0.6, 0.3, 1)  # Зеленый цвет
+        with period_completed_block.canvas.before:
+            Color(*period_completed_color)
+            Rectangle(pos=period_completed_block.pos, size=period_completed_block.size)
+        period_completed_block.bind(pos=lambda obj, val: self.update_rect_widget(obj, val, period_completed_color), 
+                                  size=lambda obj, val: self.update_rect_widget(obj, val, period_completed_color))
+        
+        period_completed_label = Label(
+            text="Заполненные карты за период",
+            font_size=sp(16),
+            bold=True
+        )
+        period_completed_value = Label(
+            text=str(completed_cards),
+            font_size=sp(24),
+            bold=True
+        )
+        period_completed_block.add_widget(period_completed_label)
+        period_completed_block.add_widget(period_completed_value)
+        
+        stats_grid.add_widget(period_total_block)
+        stats_grid.add_widget(period_completed_block)
+        
+        self.period_stats_container.add_widget(stats_grid)
+    
+    def display_monthly_stats(self, year: int = None) -> None:
+        """Отображение статистики по месяцам.
+        
+        Args:
+            year: Год для фильтрации, если None - за все время
+        """
+        # Получаем данные по месяцам
+        monthly_stats = self.db_manager.get_monthly_stats(year)
+        
+        # Если нет данных, показываем сообщение
+        if not monthly_stats:
+            no_data_label = Label(
+                text="Нет данных для отображения статистики по месяцам",
+                size_hint=(1, 0.3),
+                font_size=sp(16),
+                color=(1, 0.5, 0.5, 1)  # Светло-красный цвет
+            )
+            self.period_stats_container.add_widget(no_data_label)
+            return
+        
+        # Создаем заголовок для статистики по месяцам
+        if year:
+            monthly_header_text = f"Статистика по месяцам за {year} год"
+        else:
+            monthly_header_text = "Статистика по месяцам"
+        
+        monthly_header = Label(
+            text=monthly_header_text,
+            size_hint=(1, 0.2),
+            font_size=sp(18),
+            bold=True,
+            color=(1, 1, 1, 1)
+        )
+        self.period_stats_container.add_widget(monthly_header)
+        
+        # Создаем таблицу для отображения месячной статистики
+        monthly_grid = GridLayout(cols=3, spacing=5, size_hint=(1, 0.8))
+        
+        # Добавляем заголовки таблицы
+        headers = ["Месяц", "Год", "Количество"]
+        for header in headers:
+            header_label = Label(
+                text=header,
+                size_hint_y=None,
+                height=dp(40),
+                bold=True,
+                font_size=sp(16),
+                color=(1, 1, 1, 1)
+            )
+            with header_label.canvas.before:
+                Color(0.2, 0.3, 0.4, 1)  # Тёмно-синий цвет
+                Rectangle(pos=header_label.pos, size=header_label.size)
+            header_label.bind(size=lambda obj, val: self.update_rect_widget(obj, val, (0.2, 0.3, 0.4, 1)), 
+                            pos=lambda obj, val: self.update_rect_widget(obj, val, (0.2, 0.3, 0.4, 1)))
+            monthly_grid.add_widget(header_label)
+        
+        # Сопоставление числовых месяцев с названиями
+        month_names = {
+            "01": "Январь",
+            "02": "Февраль",
+            "03": "Март",
+            "04": "Апрель",
+            "05": "Май",
+            "06": "Июнь",
+            "07": "Июль",
+            "08": "Август",
+            "09": "Сентябрь",
+            "10": "Октябрь",
+            "11": "Ноябрь",
+            "12": "Декабрь"
+        }
+        
+        # Добавляем данные в таблицу
+        for i, (month_num, year_str, count) in enumerate(monthly_stats):
+            # Преобразуем числовой месяц в название
+            month_name = month_names.get(month_num, month_num)
+            
+            # Создаем ячейки для месяца, года и количества
+            cells = [month_name, year_str, str(count)]
+            for cell_text in cells:
+                cell_label = Label(
+                    text=cell_text,
+                    size_hint_y=None,
+                    height=dp(30),
+                    font_size=sp(14)
+                )
+                
+                # Чередование цветов строк
+                if i % 2 == 0:
+                    bg_color = (0.9, 0.9, 0.9, 1)  # Светло-серый
+                    text_color = (0, 0, 0, 1)      # Черный текст
+                else:
+                    bg_color = (0.8, 0.8, 0.8, 1)  # Серый
+                    text_color = (0, 0, 0, 1)      # Черный текст
+                
+                with cell_label.canvas.before:
+                    Color(*bg_color)
+                    Rectangle(pos=cell_label.pos, size=cell_label.size)
+                
+                cell_label.color = text_color
+                cell_label.bind(size=lambda obj, val, color=bg_color: self.update_rect_widget(obj, val, color), 
+                               pos=lambda obj, val, color=bg_color: self.update_rect_widget(obj, val, color))
+                
+                monthly_grid.add_widget(cell_label)
+        
+        # Добавляем таблицу в контейнер
+        monthly_grid_scroll = ScrollView(size_hint=(1, 0.5))
+        monthly_grid_scroll.add_widget(monthly_grid)
+        self.period_stats_container.add_widget(monthly_grid_scroll)
 
 
 if __name__ == "__main__":
