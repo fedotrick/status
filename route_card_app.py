@@ -669,6 +669,7 @@ class RouteCardApp(App):
             input_filter='int',
             padding=[10, 10, 10, 10]
         )
+        self.route_card_input.bind(on_text_validate=self.on_complete_button_press)
         layout.add_widget(self.route_card_input)
         
         # Кнопка завершения
@@ -988,6 +989,7 @@ class RouteCardApp(App):
     def reset_form(self) -> None:
         """Сброс формы в начальное состояние."""
         self.route_card_input.text = ""
+        self.route_card_input.focus = True
     
     def validate_route_card_number(self, number: str) -> Tuple[bool, str]:
         """Валидация номера маршрутной карты.
@@ -1016,11 +1018,11 @@ class RouteCardApp(App):
         normalized = str(number_int).zfill(6)
         return True, normalized
     
-    def on_complete_button_press(self, instance: Button) -> None:
+    def on_complete_button_press(self, instance) -> None:
         """Обработчик нажатия на кнопку завершения.
         
         Args:
-            instance: Кнопка, которая была нажата
+            instance: Виджет, который вызвал событие (Button или TextInput)
         """
         route_card_number = self.route_card_input.text.strip()
         
