@@ -137,3 +137,6 @@ test_db.db
 # OS specific
 .DS_Store
 Thumbs.db
+
+# Deployment archives
+*.zip
