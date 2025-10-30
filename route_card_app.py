@@ -125,6 +125,72 @@ class DatabaseManager:
         finally:
             conn.close()
     
+    def check_route_card_completed(self, route_card_number: str) -> bool:
+        """Проверка, завершена ли маршрутная карта с указанным номером.
+        
+        Args:
+            route_card_number: Номер маршрутной карты для проверки
+            
+        Returns:
+            True если карта завершена, иначе False
+        """
+        conn, cursor = self.connect()
+        
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) FROM маршрутные_карты WHERE Номер_бланка = ? AND Статус = 'Завершена'", 
+                (route_card_number,)
+            )
+            count = cursor.fetchone()[0]
+            return count > 0
+        except sqlite3.Error as e:
+            print(f"Ошибка при проверке статуса маршрутной карты: {e}")
+            return False
+        finally:
+            conn.close()
+    
+    def complete_route_card(self, route_card_number: str) -> bool:
+        """Установка статуса 'Завершена' для маршрутной карты.
+        
+        Args:
+            route_card_number: Номер маршрутной карты
+            
+        Returns:
+            True если обновление успешно, иначе False
+        """
+        conn, cursor = self.connect()
+        
+        try:
+            current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            cursor.execute(
+                "SELECT COUNT(*) FROM маршрутные_карты WHERE Номер_бланка = ?",
+                (route_card_number,)
+            )
+            exists = cursor.fetchone()[0] > 0
+            
+            if exists:
+                cursor.execute(
+                    """UPDATE маршрутные_карты 
+                       SET Статус = ?, Дата_создания = ?
+                       WHERE Номер_бланка = ?""",
+                    ("Завершена", current_date, route_card_number)
+                )
+            else:
+                cursor.execute(
+                    """INSERT INTO маршрутные_карты (Номер_бланка, Статус, Дата_создания)
+                       VALUES (?, ?, ?)""",
+                    (route_card_number, "Завершена", current_date)
+                )
+            
+            conn.commit()
+            return cursor.rowcount > 0
+        except sqlite3.Error as e:
+            print(f"Ошибка при завершении маршрутной карты: {e}")
+            return False
+        finally:
+            conn.close()
+    
     def update_card_info(
         self, 
         blank_number: str, 
@@ -515,6 +581,7 @@ class RouteCardApp(App):
         # Регулярные выражения для валидации
         self.account_number_pattern = re.compile(r"^\d{2}-\d{3}/\d{2}$")  # ММ-ННН/ГГ
         self.cluster_number_pattern = re.compile(r"^К\d{2}/\d{2}-\d{3}$")  # КГГ/ММ-ННН
+        self.route_card_pattern = re.compile(r"^\d{6}$")  # 6-значный номер
     
     def build(self) -> TabbedPanel:
         """Построение интерфейса приложения.
@@ -535,7 +602,7 @@ class RouteCardApp(App):
         
         # Вкладка редактирования с улучшенным оформлением
         edit_tab = CustomTabbedPanelItem(
-            text="Редактирование",
+            text="Внести информацию",
             background_color=(0.2, 0.3, 0.5, 1),  # Синий цвет для активной вкладки
             color=(1, 1, 1, 1)  # Белый цвет текста
         )
@@ -576,74 +643,67 @@ class RouteCardApp(App):
         """
         layout = BoxLayout(orientation="vertical", spacing=15, padding=25)
         
-        # Создание элементов управления с улучшенным оформлением
-        label_blank = Label(
-            text="Номер бланка:", 
-            size_hint=(1, 0.5),
-            font_size=sp(16),
+        # Заголовок
+        header_label = Label(
+            text="Внести информацию по маршрутной карте",
+            size_hint=(1, 0.2),
+            font_size=sp(20),
+            bold=True,
             color=(1, 1, 1, 1)
         )
-        layout.add_widget(label_blank)
+        layout.add_widget(header_label)
         
-        self.blank_input = NavigableTextInput(
-            multiline=False, 
-            size_hint=(1, 0.5),
-            font_size=sp(16),
-            hint_text="Введите номер бланка"
-        )
-        layout.add_widget(self.blank_input)
-        
-        label_account = Label(
-            text="Учетный номер (формат: ММ-ННН/ГГ):", 
-            size_hint=(1, 0.5),
-            font_size=sp(16),
-            color=(1, 1, 1, 1)
-        )
-        layout.add_widget(label_account)
-        
-        self.account_input = NavigableTextInput(
-            multiline=False, 
-            size_hint=(1, 0.5),
-            font_size=sp(16),
-            hint_text="Например: 05-002/25"
-        )
-        layout.add_widget(self.account_input)
-        
-        label_cluster = Label(
-            text="Номер кластера (формат: КГГ/ММ-ННН):", 
-            size_hint=(1, 0.5),
-            font_size=sp(16),
-            color=(1, 1, 1, 1)
-        )
-        layout.add_widget(label_cluster)
-        
-        self.cluster_input = NavigableTextInput(
-            multiline=False, 
-            size_hint=(1, 0.5),
-            font_size=sp(16),
-            hint_text="Например: К25/05-099"
-        )
-        layout.add_widget(self.cluster_input)
-        
-        # Кнопка для проверки и обновления данных с улучшенным оформлением
-        check_button = Button(
-            text="Проверить/Обновить",
-            size_hint=(1, 0.8),
-            background_color=(0.2, 0.4, 0.8, 1),  # Более яркий синий цвет
+        # Кнопка сканирования QR кода
+        scan_button = Button(
+            text="Сканировать QR код",
+            size_hint=(1, 0.4),
+            background_color=(0.3, 0.5, 0.8, 1),
             font_size=sp(18)
         )
-        check_button.bind(on_press=self.on_check_button_press)
-        layout.add_widget(check_button)
+        scan_button.bind(on_press=self.on_scan_qr_button_press)
+        layout.add_widget(scan_button)
         
-        # Изначально отключаем поля для ввода
-        self.account_input.disabled = True
-        self.cluster_input.disabled = True
+        # Разделитель
+        separator_label = Label(
+            text="или",
+            size_hint=(1, 0.15),
+            font_size=sp(16),
+            color=(0.8, 0.8, 0.8, 1)
+        )
+        layout.add_widget(separator_label)
         
-        # Настраиваем навигацию между полями
-        self.blank_input.next_widget = self.account_input
-        self.account_input.prev_widget = self.blank_input
-        self.account_input.next_widget = self.cluster_input
-        self.cluster_input.prev_widget = self.account_input
+        # Метка для ручного ввода
+        label_route_card = Label(
+            text="Номер маршрутной карты:", 
+            size_hint=(1, 0.2),
+            font_size=sp(16),
+            color=(1, 1, 1, 1)
+        )
+        layout.add_widget(label_route_card)
+        
+        # Поле ввода номера маршрутной карты
+        self.route_card_input = TextInput(
+            multiline=False, 
+            size_hint=(1, 0.3),
+            font_size=sp(18),
+            hint_text="Введите номер от 000001 до 999999",
+            input_filter='int',
+            padding=[10, 10, 10, 10]
+        )
+        layout.add_widget(self.route_card_input)
+        
+        # Кнопка завершения
+        complete_button = Button(
+            text="Завершить",
+            size_hint=(1, 0.5),
+            background_color=(0.2, 0.7, 0.3, 1),
+            font_size=sp(18)
+        )
+        complete_button.bind(on_press=self.on_complete_button_press)
+        layout.add_widget(complete_button)
+        
+        # Добавляем пробел внизу
+        layout.add_widget(Label(size_hint=(1, 0.5)))
         
         return layout
     
@@ -948,115 +1008,144 @@ class RouteCardApp(App):
     
     def reset_form(self) -> None:
         """Сброс формы в начальное состояние."""
-        self.blank_input.text = ""
-        self.account_input.text = ""
-        self.cluster_input.text = ""
-        self.account_input.disabled = True
-        self.cluster_input.disabled = True
+        self.route_card_input.text = ""
     
-    def on_check_button_press(self, instance: Button) -> None:
-        """Обработчик нажатия на кнопку проверки.
+    def validate_route_card_number(self, number: str) -> Tuple[bool, str]:
+        """Валидация номера маршрутной карты.
+        
+        Args:
+            number: Номер для проверки
+            
+        Returns:
+            Кортеж (валидный, нормализованный_номер)
+        """
+        number = number.strip()
+        
+        if not number:
+            return False, ""
+        
+        if not number.isdigit():
+            return False, number
+        
+        if len(number) > 6:
+            return False, number
+        
+        number_int = int(number)
+        if number_int < 1 or number_int > 999999:
+            return False, number
+        
+        normalized = str(number_int).zfill(6)
+        return True, normalized
+    
+    def on_complete_button_press(self, instance: Button) -> None:
+        """Обработчик нажатия на кнопку завершения.
         
         Args:
             instance: Кнопка, которая была нажата
         """
-        blank_number = self.blank_input.text.strip()
+        route_card_number = self.route_card_input.text.strip()
         
-        if not blank_number:
-            self.show_popup("Ошибка", "Введите номер бланка")
+        if not route_card_number:
+            self.show_popup("Ошибка", "Введите номер маршрутной карты")
+            return
+        
+        is_valid, normalized_number = self.validate_route_card_number(route_card_number)
+        
+        if not is_valid:
+            self.show_popup(
+                "Ошибка", 
+                "Номер должен быть шестизначным числом (от 000001 до 999999)"
+            )
             return
         
         try:
-            # Проверяем наличие бланка в базе данных
-            result = self.db_manager.check_blank_number(blank_number)
-            
-            if not result["exists"]:
-                # Бланк не найден
-                self.show_popup("Информация", f"Бланк с номером {blank_number} не найден в базе данных")
-                self.reset_form()
+            if self.db_manager.check_route_card_completed(normalized_number):
+                self.show_popup(
+                    "Ошибка", 
+                    f"Маршрутная карта №{normalized_number} уже завершена"
+                )
                 return
             
-            # Если учетный номер и номер кластера заполнены
-            if result["account_number"] and result["cluster_number"]:
+            if self.db_manager.complete_route_card(normalized_number):
                 self.show_popup(
-                    "Информация", 
-                    f"Информация по номеру бланка {blank_number} уже существует.\n"
-                    "Обратитесь к администратору или проверьте внимательно номер."
+                    "Успех", 
+                    f"Маршрутная карта №{normalized_number} успешно завершена"
                 )
                 self.reset_form()
             else:
-                # Разрешаем ввод для заполнения пустых полей
-                self.account_input.disabled = False
-                self.cluster_input.disabled = False
-                self.current_blank = blank_number
-                self.update_mode = True
-                
-                # Меняем действие кнопки на обновление
-                instance.text = "Сохранить"
-                instance.background_color = (0.2, 0.7, 0.3, 1)  # Зеленый цвет для кнопки сохранения
-                instance.unbind(on_press=self.on_check_button_press)
-                instance.bind(on_press=self.on_save_button_press)
+                self.show_popup("Ошибка", "Не удалось завершить маршрутную карту")
         except Exception as e:
-            self.show_popup("Ошибка", f"Произошла ошибка при проверке номера бланка: {e}")
+            self.show_popup("Ошибка", f"Произошла ошибка при завершении маршрутной карты: {e}")
     
-    def on_save_button_press(self, instance: Button) -> None:
-        """Обработчик нажатия на кнопку сохранения.
+    def on_scan_qr_button_press(self, instance: Button) -> None:
+        """Обработчик нажатия на кнопку сканирования QR кода.
         
         Args:
             instance: Кнопка, которая была нажата
         """
-        account_number = self.account_input.text.strip()
-        cluster_number = self.cluster_input.text.strip()
-        
-        # Проверка формата учетного номера
-        if not self.account_number_pattern.match(account_number):
-            self.show_popup(
-                "Ошибка", 
-                "Некорректный формат учетного номера. Требуемый формат: ММ-ННН/ГГ (например, 05-002/25)"
-            )
-            return
-        
-        # Проверка формата номера кластера
-        if not self.cluster_number_pattern.match(cluster_number):
-            self.show_popup(
-                "Ошибка", 
-                "Некорректный формат номера кластера. Требуемый формат: КГГ/ММ-ННН (например, К25/05-099)"
-            )
-            return
-        
-        # Проверка дублирования учетного номера
-        if self.db_manager.check_account_number(account_number):
-            self.show_popup(
-                "Ошибка", 
-                f"Учетный номер '{account_number}' уже существует в базе данных. Пожалуйста, используйте другой номер."
-            )
-            return
-        
-        # Проверка дублирования номера кластера
-        if self.db_manager.check_cluster_number(cluster_number):
-            self.show_popup(
-                "Ошибка", 
-                f"Номер кластера '{cluster_number}' уже существует в базе данных. Пожалуйста, используйте другой номер."
-            )
-            return
-        
         try:
-            # Обновляем информацию в базе данных
-            if self.db_manager.update_card_info(self.current_blank, account_number, cluster_number):
-                self.show_popup("Успех", "Информация успешно обновлена!")
+            import cv2
+            from pyzbar import pyzbar
+            
+            cap = cv2.VideoCapture(0)
+            
+            if not cap.isOpened():
+                self.show_popup("Ошибка", "Не удалось открыть камеру")
+                return
+            
+            self.show_popup("Информация", "Наведите камеру на QR код.\nНажмите ESC для отмены.")
+            
+            while True:
+                ret, frame = cap.read()
                 
-                # Сбрасываем форму
-                self.reset_form()
+                if not ret:
+                    break
                 
-                # Возвращаем кнопку в исходное состояние
-                instance.text = "Проверить/Обновить"
-                instance.background_color = (0.2, 0.4, 0.8, 1)  # Возвращаем синий цвет
-                instance.unbind(on_press=self.on_save_button_press)
-                instance.bind(on_press=self.on_check_button_press)
-            else:
-                self.show_popup("Ошибка", "Не удалось обновить информацию")
+                barcodes = pyzbar.decode(frame)
+                
+                for barcode in barcodes:
+                    barcode_data = barcode.data.decode("utf-8")
+                    
+                    is_valid, normalized_number = self.validate_route_card_number(barcode_data)
+                    
+                    if is_valid:
+                        self.route_card_input.text = normalized_number
+                        cap.release()
+                        cv2.destroyAllWindows()
+                        return
+                
+                cv2.imshow("QR Code Scanner", frame)
+                
+                if cv2.waitKey(1) & 0xFF == 27:
+                    break
+            
+            cap.release()
+            cv2.destroyAllWindows()
+            
+        except ImportError:
+            self.show_popup(
+                "Ошибка", 
+                "Для работы QR-сканера необходимо установить библиотеки opencv-python и pyzbar:\n"
+                "pip install opencv-python pyzbar"
+            )
         except Exception as e:
-            self.show_popup("Ошибка", f"Произошла ошибка при сохранении данных: {e}")
+            self.show_popup("Ошибка", f"Произошла ошибка при сканировании: {e}")
+    
+    def on_check_button_press(self, instance: Button) -> None:
+        """Обработчик нажатия на кнопку проверки (старый обработчик для совместимости).
+        
+        Args:
+            instance: Кнопка, которая была нажата
+        """
+        pass
+    
+    def on_save_button_press(self, instance: Button) -> None:
+        """Обработчик нажатия на кнопку сохранения (старый обработчик для совместимости).
+        
+        Args:
+            instance: Кнопка, которая была нажата
+        """
+        pass
     
     def get_period_dates(self, period_name: str) -> Tuple[str, str]:
         """Получение дат начала и конца периода по его названию.
