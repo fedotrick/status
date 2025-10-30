@@ -176,18 +176,18 @@ class TestRouteCardCompletionWithMocks(unittest.TestCase):
         self.mock_cursor.execute.assert_called_once()
         self.mock_conn.close.assert_called_once()
     
-    def test_complete_route_card_creates_new_record(self) -> None:
-        """Тест создания новой записи при завершении карты."""
+    def test_complete_route_card_fails_for_non_existent_card(self) -> None:
+        """Тест ошибки при попытке завершить несуществующую карту."""
         # Настраиваем мок: карта не существует
         self.mock_cursor.fetchone.return_value = (0,)
         self.mock_cursor.rowcount = 1
         
-        result = self.db_manager.complete_route_card("123456")
+        success, error_message = self.db_manager.complete_route_card("123456")
         
-        self.assertTrue(result, "Should return True for successful creation")
-        # Проверяем, что execute был вызван 2 раза (проверка существования + вставка)
-        self.assertEqual(self.mock_cursor.execute.call_count, 2)
-        self.mock_conn.commit.assert_called_once()
+        self.assertFalse(success, "Should return False for non-existent card")
+        self.assertIn("не найдена в базе данных", error_message, "Should return error message about card not found")
+        # Проверяем, что execute был вызван 1 раз (только проверка существования)
+        self.assertEqual(self.mock_cursor.execute.call_count, 1)
         self.mock_conn.close.assert_called_once()
     
     def test_complete_route_card_updates_existing_record(self) -> None:
@@ -196,9 +196,10 @@ class TestRouteCardCompletionWithMocks(unittest.TestCase):
         self.mock_cursor.fetchone.return_value = (1,)
         self.mock_cursor.rowcount = 1
         
-        result = self.db_manager.complete_route_card("123456")
+        success, error_message = self.db_manager.complete_route_card("123456")
         
-        self.assertTrue(result, "Should return True for successful update")
+        self.assertTrue(success, "Should return True for successful update")
+        self.assertIsNone(error_message, "Should not return error message on success")
         # Проверяем, что execute был вызван 2 раза (проверка существования + обновление)
         self.assertEqual(self.mock_cursor.execute.call_count, 2)
         self.mock_conn.commit.assert_called_once()
@@ -208,9 +209,11 @@ class TestRouteCardCompletionWithMocks(unittest.TestCase):
         """Тест обработки ошибки базы данных при завершении карты."""
         self.mock_cursor.execute.side_effect = sqlite3.Error("Database error")
         
-        result = self.db_manager.complete_route_card("123456")
+        success, error_message = self.db_manager.complete_route_card("123456")
         
-        self.assertFalse(result, "Should return False on database error")
+        self.assertFalse(success, "Should return False on database error")
+        self.assertIsNotNone(error_message, "Should return error message")
+        self.assertIn("Ошибка", error_message, "Error message should contain 'Ошибка'")
         self.mock_conn.close.assert_called_once()
 
 
@@ -250,15 +253,25 @@ class TestRouteCardCompletionIntegration(unittest.TestCase):
         except:
             pass
     
-    def test_complete_new_route_card(self) -> None:
-        """Тест завершения новой маршрутной карты."""
+    def test_complete_existing_route_card(self) -> None:
+        """Тест завершения существующей маршрутной карты."""
+        # Создаем карту в БД
+        conn, cursor = self.db_manager.connect()
+        cursor.execute(
+            "INSERT INTO маршрутные_карты (Номер_бланка, Статус) VALUES (?, ?)",
+            ("123456", "В работе")
+        )
+        conn.commit()
+        conn.close()
+        
         # Проверяем, что карта еще не завершена
         is_completed = self.db_manager.check_route_card_completed("123456")
         self.assertFalse(is_completed, "Card should not be completed initially")
         
         # Завершаем карту
-        result = self.db_manager.complete_route_card("123456")
-        self.assertTrue(result, "Should successfully complete the card")
+        success, error_message = self.db_manager.complete_route_card("123456")
+        self.assertTrue(success, "Should successfully complete the card")
+        self.assertIsNone(error_message, "Should not return error message")
         
         # Проверяем, что карта теперь завершена
         is_completed = self.db_manager.check_route_card_completed("123456")
@@ -275,13 +288,41 @@ class TestRouteCardCompletionIntegration(unittest.TestCase):
         self.assertEqual(record[0], "123456", "Card number should match")
         self.assertEqual(record[1], "Завершена", "Status should be 'Завершена'")
     
+    def test_complete_non_existent_route_card_fails(self) -> None:
+        """Тест ошибки при попытке завершить несуществующую карту."""
+        # Пытаемся завершить карту, которой нет в БД
+        success, error_message = self.db_manager.complete_route_card("999999")
+        
+        self.assertFalse(success, "Should fail for non-existent card")
+        self.assertIsNotNone(error_message, "Should return error message")
+        self.assertIn("не найдена в базе данных", error_message, 
+                     "Error message should indicate card not found")
+        
+        # Проверяем, что запись НЕ была создана
+        conn, cursor = self.db_manager.connect()
+        cursor.execute("SELECT COUNT(*) FROM маршрутные_карты WHERE Номер_бланка = ?", 
+                      ("999999",))
+        count = cursor.fetchone()[0]
+        conn.close()
+        
+        self.assertEqual(count, 0, "Card should not be created in database")
+    
     def test_complete_route_card_sets_completion_date(self) -> None:
         """Тест установки даты завершения при завершении карты."""
+        # Создаем карту в БД
+        conn, cursor = self.db_manager.connect()
+        cursor.execute(
+            "INSERT INTO маршрутные_карты (Номер_бланка, Статус) VALUES (?, ?)",
+            ("654321", "В работе")
+        )
+        conn.commit()
+        conn.close()
+        
         before_time = datetime.now()
         
         # Завершаем карту
-        result = self.db_manager.complete_route_card("654321")
-        self.assertTrue(result, "Should successfully complete the card")
+        success, error_message = self.db_manager.complete_route_card("654321")
+        self.assertTrue(success, "Should successfully complete the card")
         
         after_time = datetime.now()
         
@@ -306,9 +347,18 @@ class TestRouteCardCompletionIntegration(unittest.TestCase):
         
         for number in test_numbers:
             with self.subTest(number=number):
+                # Создаем карту в БД
+                conn, cursor = self.db_manager.connect()
+                cursor.execute(
+                    "INSERT INTO маршрутные_карты (Номер_бланка, Статус) VALUES (?, ?)",
+                    (number, "В работе")
+                )
+                conn.commit()
+                conn.close()
+                
                 # Завершаем карту
-                result = self.db_manager.complete_route_card(number)
-                self.assertTrue(result, f"Should successfully complete card {number}")
+                success, error_message = self.db_manager.complete_route_card(number)
+                self.assertTrue(success, f"Should successfully complete card {number}")
                 
                 # Проверяем, что номер сохранился с ведущими нулями
                 conn, cursor = self.db_manager.connect()
@@ -360,9 +410,18 @@ class TestDuplicateDetection(unittest.TestCase):
     
     def test_duplicate_completed_card_detected(self) -> None:
         """Тест обнаружения дубликата завершенной карты."""
+        # Создаем карту в БД
+        conn, cursor = self.db_manager.connect()
+        cursor.execute(
+            "INSERT INTO маршрутные_карты (Номер_бланка, Статус) VALUES (?, ?)",
+            ("123456", "В работе")
+        )
+        conn.commit()
+        conn.close()
+        
         # Завершаем карту первый раз
-        result = self.db_manager.complete_route_card("123456")
-        self.assertTrue(result, "First completion should succeed")
+        success, error_message = self.db_manager.complete_route_card("123456")
+        self.assertTrue(success, "First completion should succeed")
         
         # Проверяем, что карта завершена
         is_completed = self.db_manager.check_route_card_completed("123456")
@@ -377,11 +436,20 @@ class TestDuplicateDetection(unittest.TestCase):
         """Тест множественных попыток завершения одной карты."""
         card_number = "555555"
         
+        # Создаем карту в БД
+        conn, cursor = self.db_manager.connect()
+        cursor.execute(
+            "INSERT INTO маршрутные_карты (Номер_бланка, Статус) VALUES (?, ?)",
+            (card_number, "В работе")
+        )
+        conn.commit()
+        conn.close()
+        
         # Завершаем карту 3 раза
         for i in range(3):
             with self.subTest(attempt=i+1):
                 if i == 0:
-                    # Первая попытка должна создать запись
+                    # Первая попытка должна завершить карту
                     self.assertFalse(self.db_manager.check_route_card_completed(card_number),
                                    "Card should not be completed before first attempt")
                 else:
@@ -390,8 +458,8 @@ class TestDuplicateDetection(unittest.TestCase):
                                   f"Duplicate should be detected on attempt {i+1}")
                 
                 # Завершаем карту (или обновляем существующую)
-                result = self.db_manager.complete_route_card(card_number)
-                self.assertTrue(result, f"Attempt {i+1} should succeed")
+                success, error_message = self.db_manager.complete_route_card(card_number)
+                self.assertTrue(success, f"Attempt {i+1} should succeed")
         
         # Проверяем, что в БД только одна запись
         conn, cursor = self.db_manager.connect()
@@ -408,13 +476,22 @@ class TestDuplicateDetection(unittest.TestCase):
         
         for card_number in cards:
             with self.subTest(card=card_number):
+                # Создаем карту в БД
+                conn, cursor = self.db_manager.connect()
+                cursor.execute(
+                    "INSERT INTO маршрутные_карты (Номер_бланка, Статус) VALUES (?, ?)",
+                    (card_number, "В работе")
+                )
+                conn.commit()
+                conn.close()
+                
                 # Проверяем, что карта не завершена
                 is_completed = self.db_manager.check_route_card_completed(card_number)
                 self.assertFalse(is_completed, f"Card {card_number} should not be completed initially")
                 
                 # Завершаем карту
-                result = self.db_manager.complete_route_card(card_number)
-                self.assertTrue(result, f"Should successfully complete card {card_number}")
+                success, error_message = self.db_manager.complete_route_card(card_number)
+                self.assertTrue(success, f"Should successfully complete card {card_number}")
                 
                 # Проверяем, что карта завершена
                 is_completed = self.db_manager.check_route_card_completed(card_number)
@@ -500,6 +577,15 @@ class TestUserMessagesAndErrorHandling(unittest.TestCase):
     
     def test_success_message_for_valid_completion(self) -> None:
         """Тест сообщения об успехе при валидном завершении."""
+        # Создаем карту в БД
+        conn, cursor = self.app.db_manager.connect()
+        cursor.execute(
+            "INSERT INTO маршрутные_карты (Номер_бланка, Статус) VALUES (?, ?)",
+            ("123456", "В работе")
+        )
+        conn.commit()
+        conn.close()
+        
         self.app.route_card_input.text = "123456"
         
         self.app.on_complete_button_press(MagicMock())
@@ -511,6 +597,15 @@ class TestUserMessagesAndErrorHandling(unittest.TestCase):
     
     def test_error_message_for_duplicate(self) -> None:
         """Тест сообщения об ошибке при дубликате."""
+        # Создаем карту в БД
+        conn, cursor = self.app.db_manager.connect()
+        cursor.execute(
+            "INSERT INTO маршрутные_карты (Номер_бланка, Статус) VALUES (?, ?)",
+            ("123456", "В работе")
+        )
+        conn.commit()
+        conn.close()
+        
         # Завершаем карту первый раз
         self.app.route_card_input.text = "123456"
         self.app.on_complete_button_press(MagicMock())
@@ -529,6 +624,15 @@ class TestUserMessagesAndErrorHandling(unittest.TestCase):
     
     def test_form_reset_after_successful_completion(self) -> None:
         """Тест сброса формы после успешного завершения."""
+        # Создаем карту в БД
+        conn, cursor = self.app.db_manager.connect()
+        cursor.execute(
+            "INSERT INTO маршрутные_карты (Номер_бланка, Статус) VALUES (?, ?)",
+            ("123456", "В работе")
+        )
+        conn.commit()
+        conn.close()
+        
         self.app.route_card_input.text = "123456"
         
         self.app.on_complete_button_press(MagicMock())
