@@ -149,45 +149,40 @@ class DatabaseManager:
         finally:
             conn.close()
     
-    def complete_route_card(self, route_card_number: str) -> bool:
+    def complete_route_card(self, route_card_number: str) -> Tuple[bool, str]:
         """Установка статуса 'Завершена' для маршрутной карты.
         
         Args:
             route_card_number: Номер маршрутной карты
             
         Returns:
-            True если обновление успешно, иначе False
+            Кортеж (успех, сообщение об ошибке или None)
         """
         conn, cursor = self.connect()
         
         try:
-            current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
             cursor.execute(
                 "SELECT COUNT(*) FROM маршрутные_карты WHERE Номер_бланка = ?",
                 (route_card_number,)
             )
             exists = cursor.fetchone()[0] > 0
             
-            if exists:
-                cursor.execute(
-                    """UPDATE маршрутные_карты 
-                       SET Статус = ?, Дата_создания = ?
-                       WHERE Номер_бланка = ?""",
-                    ("Завершена", current_date, route_card_number)
-                )
-            else:
-                cursor.execute(
-                    """INSERT INTO маршрутные_карты (Номер_бланка, Статус, Дата_создания)
-                       VALUES (?, ?, ?)""",
-                    (route_card_number, "Завершена", current_date)
-                )
+            if not exists:
+                return False, f"Маршрутная карта №{route_card_number} не найдена в базе данных"
+            
+            current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            cursor.execute(
+                """UPDATE маршрутные_карты 
+                   SET Статус = ?, Дата_создания = ?
+                   WHERE Номер_бланка = ?""",
+                ("Завершена", current_date, route_card_number)
+            )
             
             conn.commit()
-            return cursor.rowcount > 0
+            return cursor.rowcount > 0, None
         except sqlite3.Error as e:
-            print(f"Ошибка при завершении маршрутной карты: {e}")
-            return False
+            return False, f"Ошибка при завершении маршрутной карты: {e}"
         finally:
             conn.close()
     
@@ -653,26 +648,10 @@ class RouteCardApp(App):
         )
         layout.add_widget(header_label)
         
-        # Кнопка сканирования QR кода
-        scan_button = Button(
-            text="Сканировать QR код",
-            size_hint=(1, 0.4),
-            background_color=(0.3, 0.5, 0.8, 1),
-            font_size=sp(18)
-        )
-        scan_button.bind(on_press=self.on_scan_qr_button_press)
-        layout.add_widget(scan_button)
+        # USB QR-сканер работает как клавиатура и автоматически
+        # вводит номер в активное текстовое поле
         
-        # Разделитель
-        separator_label = Label(
-            text="или",
-            size_hint=(1, 0.15),
-            font_size=sp(16),
-            color=(0.8, 0.8, 0.8, 1)
-        )
-        layout.add_widget(separator_label)
-        
-        # Метка для ручного ввода
+        # Метка для ввода
         label_route_card = Label(
             text="Номер маршрутной карты:", 
             size_hint=(1, 0.2),
@@ -1066,70 +1045,18 @@ class RouteCardApp(App):
                 )
                 return
             
-            if self.db_manager.complete_route_card(normalized_number):
+            success, error_message = self.db_manager.complete_route_card(normalized_number)
+            
+            if success:
                 self.show_popup(
                     "Успех", 
                     f"Маршрутная карта №{normalized_number} успешно завершена"
                 )
                 self.reset_form()
             else:
-                self.show_popup("Ошибка", "Не удалось завершить маршрутную карту")
+                self.show_popup("Ошибка", error_message or "Не удалось завершить маршрутную карту")
         except Exception as e:
             self.show_popup("Ошибка", f"Произошла ошибка при завершении маршрутной карты: {e}")
-    
-    def on_scan_qr_button_press(self, instance: Button) -> None:
-        """Обработчик нажатия на кнопку сканирования QR кода.
-        
-        Args:
-            instance: Кнопка, которая была нажата
-        """
-        try:
-            import cv2
-            from pyzbar import pyzbar
-            
-            cap = cv2.VideoCapture(0)
-            
-            if not cap.isOpened():
-                self.show_popup("Ошибка", "Не удалось открыть камеру")
-                return
-            
-            self.show_popup("Информация", "Наведите камеру на QR код.\nНажмите ESC для отмены.")
-            
-            while True:
-                ret, frame = cap.read()
-                
-                if not ret:
-                    break
-                
-                barcodes = pyzbar.decode(frame)
-                
-                for barcode in barcodes:
-                    barcode_data = barcode.data.decode("utf-8")
-                    
-                    is_valid, normalized_number = self.validate_route_card_number(barcode_data)
-                    
-                    if is_valid:
-                        self.route_card_input.text = normalized_number
-                        cap.release()
-                        cv2.destroyAllWindows()
-                        return
-                
-                cv2.imshow("QR Code Scanner", frame)
-                
-                if cv2.waitKey(1) & 0xFF == 27:
-                    break
-            
-            cap.release()
-            cv2.destroyAllWindows()
-            
-        except ImportError:
-            self.show_popup(
-                "Ошибка", 
-                "Для работы QR-сканера необходимо установить библиотеки opencv-python и pyzbar:\n"
-                "pip install opencv-python pyzbar"
-            )
-        except Exception as e:
-            self.show_popup("Ошибка", f"Произошла ошибка при сканировании: {e}")
     
     def on_check_button_press(self, instance: Button) -> None:
         """Обработчик нажатия на кнопку проверки (старый обработчик для совместимости).
